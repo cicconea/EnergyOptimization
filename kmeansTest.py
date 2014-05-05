@@ -71,6 +71,23 @@ for i in range(0, x):
 #adjust array to numpy and reshape
 latLongDistArray = numpy.array(latLongDistArray)
 
-print latLongDistArray
+#add back column headers and reshape
+clusterIDArray = ["ClusterID"]
+label = numpy.concatenate((clusterIDArray, label), axis = 1)
+label = numpy.reshape(label, (len(result), 1))
 
+plantIDArray = [["PlantLat", "PlantLong"]]
+plantIDArray = numpy.array(plantIDArray)
+plantArray = numpy.concatenate((plantIDArray, plantArray), axis = 0)
+plantArray = numpy.reshape(plantArray, (len(result), 2))
+
+distArray = ["Distance (Mi)"]
+latLongDistArray = numpy.concatenate((distArray, latLongDistArray), axis = 1)
+latLongDistArray = numpy.reshape(latLongDistArray, (len(result), 1))
+
+result = numpy.append(result, label, axis =1)
+result = numpy.append(result, plantArray, axis =1)
+result = numpy.append(result, latLongDistArray, axis =1)
+
+numpy.savetxt("OptOutput.csv", result, delimiter=",", fmt="%s")
 

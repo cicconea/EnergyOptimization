@@ -71,6 +71,17 @@ for i in range(0, x):
 #adjust array to numpy and reshape
 latLongDistArray = numpy.array(latLongDistArray)
 
+result = numpy.append(result, label, axis = 1)
+result = numpy.append(result, plantArray, axis = 1)
+result = numpy.append(result, latLongDistArray, axis = 1)
+
+def csv_writer(result, "/Users/adrianaciccone/Documents/UChicago/Spring 2014 Energy Practicum/"):
+    with open(path, "optOutput") as csv_file:
+        writer = csv.writer(csv_file, delimiter=',')
+        for line in data:
+            writer.writerow(line)
+
+
 
 # Regionalize demand
 
