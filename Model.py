@@ -36,12 +36,6 @@ for i in range(0, len(label)):
     plantCenter = centroid[groupID, :]
     plantArray[i] = plantCenter 
 
-print "centroid"
-print centroid
-print "plantArray"
-print plantArray
-
-
 
 def distance_on_unit_sphere(lat1, long1, lat2, long2):
     # Convert latitude and longitude to
@@ -71,12 +65,12 @@ x = len(stationLatLong)
 latLongDistArray = []
 
 for i in range(0, x):
-    latLongDist = distance_on_unit_sphere(stationLatLong[i, 0], stationLatLong[i,1], stationLatLong[i,2], stationLatLong[i,3])
+    latLongDist = distance_on_unit_sphere(stationLatLong[i, 0], stationLatLong[i,1], plantArray[i,0], plantArray[i,1])
     latLongDistArray.append(latLongDist)
 
 #adjust array to numpy and reshape
 latLongDistArray = numpy.array(latLongDistArray)
-numpy.transpose(latLongDistArray)
+
 
 # Regionalize demand
 

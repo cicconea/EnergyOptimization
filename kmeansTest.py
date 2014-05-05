@@ -36,8 +36,41 @@ for i in range(0, len(label)):
     plantCenter = centroid[groupID, :]
     plantArray[i] = plantCenter 
 
-print "centroid"
-print centroid
-print "plantArray"
-print plantArray
+
+def distance_on_unit_sphere(lat1, long1, lat2, long2):
+    # Convert latitude and longitude to
+    # spherical coordinates in radians.
+    degrees_to_radians = math.pi/180.0
+
+    # phi = 90 - latitude
+    phi1 = (90.0 - lat1)*degrees_to_radians
+    phi2 = (90.0 - lat2)*degrees_to_radians
+
+    # theta = longitude
+    theta1 = long1*degrees_to_radians
+    theta2 = long2*degrees_to_radians
+
+    # Compute spherical distance from spherical coordinates on unit sphere
+
+    cos = (math.sin(phi1)*math.sin(phi2)*math.cos(theta1 - theta2) +
+           math.cos(phi1)*math.cos(phi2))
+    arc = math.acos( cos )
+
+    # multiply by radius of earth in miles
+    arc *= 3963.1676
+    return arc
+
+#generate distances:
+x = len(stationLatLong)
+latLongDistArray = []
+
+for i in range(0, x):
+    latLongDist = distance_on_unit_sphere(stationLatLong[i, 0], stationLatLong[i,1], plantArray[i,0], plantArray[i,1])
+    latLongDistArray.append(latLongDist)
+
+#adjust array to numpy and reshape
+latLongDistArray = numpy.array(latLongDistArray)
+
+print latLongDistArray
+
 
