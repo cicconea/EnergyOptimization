@@ -3,6 +3,8 @@ import numpy
 import csv
 import math
 import scipy.cluster.vq
+import datetime
+import random
 
 
 # import station data to perform clustering
@@ -23,7 +25,7 @@ stationLatLong = result[1:,[20,21]]
 stationLatLong = stationLatLong.astype('float32')
 
 #cluster
-kNumber = 2
+kNumber = 100
 centroid, label = scipy.cluster.vq.kmeans2(stationLatLong, kNumber, iter=50, thresh=1e-05, minit='random', missing='warn')
 
 plantArray = numpy.ndarray(shape=(len(label),2), dtype=float, order='F')
@@ -64,6 +66,8 @@ def distance_on_unit_sphere(lat1, long1, lat2, long2):
 x = len(stationLatLong)
 latLongDistArray = []
 
+#sometimes code doesn't run because lat/longs between station & plants too
+#similar - divide by 0 error. Ought to fix, but can be re-run to fix.
 for i in range(0, x):
     latLongDist = distance_on_unit_sphere(stationLatLong[i, 0], stationLatLong[i,1], plantArray[i,0], plantArray[i,1])
     latLongDistArray.append(latLongDist)
@@ -89,5 +93,50 @@ result = numpy.append(result, label, axis =1)
 result = numpy.append(result, plantArray, axis =1)
 result = numpy.append(result, latLongDistArray, axis =1)
 
-numpy.savetxt("OptOutput.csv", result, delimiter=",", fmt="%s")
+numpy.savetxt("OptOutput@{0}.csv".format(datetime.datetime.now()), result, delimiter=",", fmt="%s")
+
+
+#import demand information
+# dummy import with random #s
+
+demandArray = numpy.ndarray(shape=(len(stationLatLong),1), dtype=float, order='F')
+
+for i in range (0, len(stationLatLong)):
+    demandArray[i] = random.random()
+
+demandArray *= 1000000
+
+# need to set up station cost function
+    # include nodeStorage cost & capacity
+
+
+# now set up decision criteria for distribution
+# calculate costs of each distribution method, then pick the lowest and
+# assign it to a station. 
+
+def costPipeline(distance, demand, nodeStorage)
+    # set up pipeline constraint
+    pipeCapacity = 100 # m^3/ mi
+    unitPipeCost = 300 # $/mile
+
+    # TODO - convert demand to m^3
+
+    totalPipeCost = distance * unitPipeCost
+    # Figure out if we can actually store  the right quantity in
+    # pipeline setup
+    if (demand - nodeStorage)/distance > pipeCapacity:
+        capacityBool = False
+        else capacityBool = True
+        
+    return totalPipeCost, capacityBool
+    
+def costTruck(distance, demand, nodeStorage)
+    truckCapacity = 30 # m^3
+    unitTruckCost = 200 # $
+
+
+
+# reformer cost = reformer * number of stations but demand constraint
+    
+
 
