@@ -8,50 +8,47 @@ import random
 import decimal
 import copy
 
+print "we are starting at ", datetime.datetime.now()
+
+#TODO - decide demand # ie steady state year or total lifetime
+#TODO - input national demand
+nationalDemand = 100000000
+totalNetworkCostSum = float('inf')
+
 # import station data to perform clustering
-reader=csv.reader(open("altFuelStations_cleaned.csv","rU"),delimiter=',')
+reader=csv.reader(open("traffic_vol_calc.csv","rU"),delimiter=',')
 x=list(reader)
 result=numpy.array(x)
+resultHeader = result[0,:]
+result = result[1:, :]
 
 # isolate hydrogen sites  
-# Description in Col1, Station Latitude in Col2, Longitude in Col3
+# Order is: lat | long | brand | id | type | volume | # roads | weight
 HYstationLatLongAll = []
 HYstationLatLong = []
-HYstationLatLongAll = result[result[:,3] == "HY"]
-HYstationLatLong = HYstationLatLongAll[:, [1,2]]
+HYstationLatLongAll = result[result[:,4] == "HY"]
+HYstationLatLong = HYstationLatLongAll[:, [0,1]]
 HYstationLatLong = HYstationLatLong.astype(float)
 
 # isolate natural gas sites
 NGstationLatLongAll = []
 NGstationLatLong = []
-NGstationLatLongAll = result[result[:,3] != "HY"]
-NGstationLatLong = NGstationLatLongAll[:, [1,2]]
+NGstationLatLongAll = result[result[:,4] != "Gas"]
+NGstationLatLongAll = NGstationLatLongAll[NGstationLatLongAll[:,4] != "HY"]
+NGstationLatLong = NGstationLatLongAll[:, [0,1]]
 NGstationLatLong = NGstationLatLong.astype(float)
 
 # initialize gas station network
-reader = csv.reader(open("gas_agg.csv","rU"),delimiter=',')
-x = list(reader)
 GasstationLatLong = []
-GasstationLatLongAll = numpy.array(x)
-GasstationLatLong = GasstationLatLongAll[:, [2,3]]
+GasstationLatLongAll = result[result[:,4] == "Gas"]
+GasstationLatLong = GasstationLatLongAll[:, [0,1]]
 GasstationLatLong = GasstationLatLong.astype(float)
 
 
-# import demand file/whatever else
-NGdemandArray = numpy.ndarray(shape=(len(NGstationLatLong),1), dtype=float, order='F')
-for i in range (0, len(NGstationLatLong)):
-    NGdemandArray[i] = random.random()*1000000
-    # TODO - convert demand to m^3
+GasdemandArray = numpy.multiply(GasstationLatLongAll[:,7].astype(float), nationalDemand)
+NGdemandArray = numpy.multiply(NGstationLatLongAll[:,7].astype(float), nationalDemand)
+HYdemandArray = numpy.multiply(HYstationLatLongAll[:,7].astype(float), nationalDemand)
 
-HYdemandArray = numpy.ndarray(shape=(len(HYstationLatLong),1), dtype=float, order='F')
-for i in range (0, len(HYstationLatLong)):
-    HYdemandArray[i] = random.random()*1000000
-    # TODO - convert demand to m^3
-
-GasdemandArray = numpy.ndarray(shape=(len(GasstationLatLong), 1), dtype = float, order = 'F')
-for i in range (0, len(GasstationLatLong)):
-    GasdemandArray[i] = random.random()*1000000
-    # TODO - convert demand to m^3
 
 # What are maximum number of plants that the total US demand could support?
 # Total US demand divided by the minimum viable H2 production plant capacity
@@ -85,17 +82,15 @@ def distance_on_unit_sphere(lat1, long1, lat2, long2):
 
     # TODO - initialize with existing plants and fix random initialization. 
 
-# should be maxPlantNumber
-for kNumber in range(1,2, 1000): 
-    print datetime.datetime.now()
-    print kNumber
+# TODO - should be maxPlantNumber
+for kNumber in range(1,3, 500): 
+    print "kNumber ", kNumber, " is starting at ", datetime.datetime.now()
 
     # perform the clustering
     # centroid is the output of kNumber centroids and label is the assigning of stations in the
     # lat/long array to each centroid. 
     centroid, label = scipy.cluster.vq.kmeans2(GasstationLatLong, kNumber, iter=100, thresh=1e-05, minit='random', missing='warn')
     plantArray = numpy.ndarray(shape=(len(label),2), dtype=float, order='F')
-
 
     # now add centroid lat/longs to result (import file) to calculate distances
     # copy labels, then replace going along for i in len(centroid)
@@ -109,6 +104,8 @@ for kNumber in range(1,2, 1000):
     # demand for gas stations. Since the other types of stations already have a distribution mechanism, and any new
     # production facilities will have to supply aggregate demand of clustered gas stations. 
     label = numpy.reshape(label, (len(label), 1))
+    GasdemandArray = numpy.reshape(GasdemandArray, (len(GasdemandArray), 1))
+
     label = numpy.append(label, GasdemandArray, axis = 1)
     plantDemandArray = numpy.ndarray(shape=(len(centroid),2), dtype=float, order='F')
 
@@ -131,25 +128,8 @@ for kNumber in range(1,2, 1000):
     label = numpy.append(label, latLongDistArray, axis = 1)
 
     # now set up decision criteria for distribution
-    # calculate costs of each distribution method, then pick the lowest and
-    # assign it to a station. 
-    def costPipeline(distance, demand):
-        # set up pipeline constraint
-        pipeCapacity = 50000000 # m^3/ mi
-        unitPipeCost = 300 # $/mile
-        totalPipeCost = distance * unitPipeCost    
-        # Figure out if we can actually store  the right quantity in
-        # pipeline setup
-        if distance != 0:
-            if (demand)/distance > pipeCapacity:
-                capacityBool = False
-                totalPipeCost = float("inf") # we make this too expensive
-            else:
-                capacityBool = True
-        else: capacityBool = True       
-        return totalPipeCost, capacityBool
-
-    def costTruck(distance, demand, nodeStorage):
+    
+    def costTruck(distance, demand):
         truckCapacity = 30 # m^3
         unitTruckCost = 200 # $
         # do we need to adjust cost piecewise for truck distances?
@@ -160,144 +140,152 @@ for kNumber in range(1,2, 1000):
     # reformer cost = reformer * number of stations but demand constraint
     def costReformer(demand):
         #capital costs
+        # we assume the station already exists, so all we need to add is the H2 generating equipment
         NGCost = 5 # $ per kg of H2 created
         reformerCapacity = 5000
         reformerCost = 3
         reformerNumber = math.ceil(demand/reformerCapacity) #round up
-        totalReformerCost = reformerNumber * reformerCost + NGCost*demand
+        # reformer cost is total installation costs divided by demand (fixed segment) plus NG cost
+        totalReformerCost = (reformerNumber * reformerCost) + NGCost*demand
         return totalReformerCost
-
 
     # Plant Production Cost
     def plantCost(aggDemand):
+        plantVarCost = 10 # $per kg H2 produced
         if aggDemand<5000000000:
             plantCost = 2000000000
         elif aggDemand>10000000000:
             plantCost = 5000000000
         else:
             plantCost = 3000000000
-        return plantCost
+        # assume constant variable costs across all plants. 
+        return plantCost + plantVarCost*aggDemand
 
 
 
 
     def assignProduction(plantTotalCost, aggDemand, clusterNodes):
         # figure out what kind of edge to have
-        # prodCost is portion of plant total cost assigned to that node
+        # prodCost is portion of plant total cost assigned to that node - will change in while loop later
         prodCost = plantTotalCost/aggDemand
+
+        # set up reformer cost calculation - what is setup cost of reformer + H2 Production cost
         reformCost = numpy.ndarray((len(clusterNodes),1), dtype = float)
         for i in range(0, len(clusterNodes)):
             reformCost[i] = costReformer(clusterNodes[i, 1].astype(float))    
+        # set up edge decision array - initialize as plant, then go through adjustment process in
+        # while loop
         edgeDecision = numpy.ndarray(shape=(len(clusterNodes), 1), dtype='S20')
         edgeDecision[:] = "Plant"
-
-        print edgeDecision.shape
-        print clusterNodes.shape
-        print reformCost.shape
+        # add costs for plant production
+        plantNodeCost = numpy.ndarray(shape=(len(clusterNodes), 1), dtype=float)
+        # we want to spit out all information from this function, including costs, so we append all
+        # arrays together
         clusterNodes = numpy.append(clusterNodes, reformCost, axis = 1)
         clusterNodes = numpy.append(clusterNodes, edgeDecision, axis = 1)
+        clusterNodes = numpy.append(clusterNodes, plantNodeCost, axis = 1)
         transfer = float('inf')
         while transfer != 0:
+            # to check the change from the beginning of the while loop to the end (when cost changes
+            # are taken in to account) we copy the clusterNodes at the beginning of the loop
             updateArray = copy.copy(clusterNodes)
+            # figure out new demand (if some nodes transfer from plant to reformer in previous period)
+            # and calculate the new plant cost
             subAggDemand = numpy.sum(clusterNodes[:, 1].astype('float'))
-            prodCost = plantTotalCost/subAggDemand
+            prodCost = plantCost(subAggDemand)/subAggDemand
+            # now we actually calculate the lowest-cost edge between plant and station. 
             for i in range(0, len(clusterNodes)):
                 edge = clusterNodes[i, 2]
-                edgePipeCost, edgePipeCap = costPipeline(edge.astype("float32"), subAggDemand)
-                if edgePipeCap == True:
-                    if edgePipeCost + prodCost > reformCost[i]:
-                        clusterNodes[i, 4] = "Reformer"
-                    else:
-                        clusterNodes[i,4] = "Plant"
+                edgeTruckCost = costTruck(edge.astype("float32"), subAggDemand)
+                if edgeTruckCost + prodCost >= reformCost[i]:
+                    clusterNodes[i, 4] = "Reformer"
+                    clusterNodes[i, 5] = clusterNodes[i,3]
                 else:
-                    clusterNodes[i, 4] = "Plant"
-            transfer = 0
+                    clusterNodes[i,4] = "Plant"
+                    clusterNodes[i, 5] = clusterNodes[i,2].astype("float32")*prodCost
+
+            # now figure out what has changed from last iteration to this one
+            transfer = 0           
             for i in range(0, len(clusterNodes)):
                 if updateArray[i,4].astype(str) != clusterNodes[i,4].astype(str):
                     transfer +=1
+            print 'transfer = ', transfer
         return clusterNodes
-
+    
+#TODO - NG station reformer costs
 #TODO - foregone gas profits
-    DecisionArray = numpy.ndarray(shape=(len(GasstationLatLong), 5))
     start = 0
+    totalDecision = []
     for i in range(0, kNumber):
         clusterNodes = label[label[:, 0] == i]
         row = len(clusterNodes)
         aggDemand = plantDemandArray[i, 1].astype("float32")
         plantTotalCost = plantCost(aggDemand)
         Decision = assignProduction(plantTotalCost, aggDemand, clusterNodes)
-        DecisionArray[start:row, :] = DecisionArray
-        start = row + 1
-        # cost multiplication
+        if i == 0:
+            totalDecision = Decision
+        else:
+            totalDecision = numpy.append(totalDecision, Decision, axis = 0)
+   
 
-                             
+   
+    print "totalDecision complete at ", datetime.datetime.now()
 
-    distributionCostArray = numpy.ndarray(shape=(len(HYstationLatLong),3), order='F')
-    #for i in range(0, len(HYstationLatLong)):
-#        edgePipeCost, edgePipeBool = costPipeline(latLongDistArray[i].astype("float32"), HYdemandArray[i].astype("float32"))
-#        edgeTruckCost = costTruck(latLongDistArray[i].astype("float32"), HYdemandArray[i].astype("float32"))
-#        distributionCostArray[i] = [edgePipeCost, edgePipeBool, edgeTruckCost]
+    
 
+    # total costs and other network details stored in:
+    lowCostNetwork = numpy.ndarray(shape=(len(totalDecision), 5), dtype ='S20')
 
-#    nodeProductionCostArray = numpy.ndarray(shape=(len(NGstationLatLong), 1), order='F')
-#    for i in range(0, len(NGstationLatLong)):
-#        nodeReformerCost = costReformer(NGdemandArray[i].astype("float32"))
-#        nodeProductionCostArray[i] = nodeReformerCost
+    if networkCost < totalNetworkCostSum:
+        lowCostNetwork = totalDecision
+        lowKNumber = kNumber
 
+    totalNetworkCostSum = networkCost        
 
-    # Production cost at plant - assume same costs over all regions
+print 'lowest cost gas network cluster number is ', lowKNumber
+print lowCostNetwork[0:100]
 
-#    def plantCapitalOperatingCosts(aggDemand):
-#        for i in range(1, len(plantDemandArray)):
-#            if plantDemandArray[i] < 200: # some capacity       
-#                plantFixedCost = 5
-#                plantOpCost = 1* plantDemandArray[i].astype('float32')
-#            elif plantDemandArray[i] >= 200: #more options available
-#                plantFixedCost = 10
-#                plantOpCost = 1* plantDemandArray[i].astype('float32')
+print 'Now calculate low cost NG station'
 
-#        return plantCapitalOperatingCost
-
-       
-
-    print label[0:20]
-    print datetime.datetime.now()
-    print
-    print
-    print
+NGstationCost = numpy.ndarray(shape=(len(NGstationLatLongAll),1), dtype=float)
+for i in range(0, len(NGdemandArray)):
+    # need foregone NG revenue here too!
+    NGstationCost[i] = costReformer(NGdemandArray[i].astype(float)) 
     
 
 
 
+# need to calculate total station costs per steady-state year
+def StationProfit(stationArray, H2price, gasPrice):
+    return null
+ 
+plantNodes = totalDecision[totalDecision[:,4] == "Plant"]
+reformerNodes = totalDecision[totalDecision[:,4] =="Reformer"]
+plantNodesCost = plantNodes[:,5].astype(float)
+reformerNodesCost = reformerNodes[:,5].astype(float)
+networkCost = numpy.sum(plantNodesCost) + numpy.sum(reformerNodesCost)
+print "Network Cost for ", kNumber, "plants is ", networkCost
+print 'analysis complete at ', datetime.datetime.now()
+
+
+
+
+    # Production cost at plant - assume same costs over all regions
+      
+
+
+
+
+
     # TO FIX
+    # all production costs covered
     # catch all non-positive inequalities
     # make sure last array entries aren't getting dropped
     # include nodeStorage cost & capacity
     # cost of reforming, but will have to write in preclusion of other network
     # and only use NG stations
-    #SAVE EVERYTHING BACK TO HYresult and NYresult
 
-    #distributionCostArray = numpy.concatenate(([["Edge Pipe Cost", "Edge Pipe Bool", "EdgeTruckCost"]], distributionCostArray), axis = 0)
-    #nodeProductionCostArray = numpy.concatenate(([["Total Node Reformer Cost"]], nodeProductionCostArray), axis = 0)
-
-
-
-
-    #add back column headers and reshape
-    #label = numpy.concatenate((["ClusterID"], label), axis = 1)
-    #label = numpy.reshape(label, (len(result), 1))
-
-    #plantArray = numpy.concatenate(([["PlantLat", "PlantLong"]], plantArray), axis = 0)
-    #plantArray = numpy.reshape(plantArray, (len(result), 2))
-
-    #latLongDistArray = numpy.concatenate((["Distance (Mi)"], latLongDistArray), axis = 1)
-    #latLongDistArray = numpy.reshape(latLongDistArray, (len(result), 1))
-
-    # add to our results file
-    #result = numpy.append(result, label, axis =1)
-    #result = numpy.append(result, plantArray, axis =1)
-    #result = numpy.append(result, latLongDistArray, axis =1)
-
+ 
     #export everything from "result" array
     #numpy.savetxt("OptOutput@{0}.csv".format(datetime.datetime.now()), result, delimiter=",", fmt="%s")
 
