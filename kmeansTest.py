@@ -13,7 +13,7 @@ print "we are starting at ", datetime.datetime.now()
 #TODO - decide demand # ie steady state year or total lifetime
 #TODO - input national demand
 nationalDemand = 100000000
-totalNetworkCostSum = float('inf')
+totalGasNetworkCostSum = float('inf')
 
 # import station data to perform clustering
 reader=csv.reader(open("traffic_vol_calc.csv","rU"),delimiter=',')
@@ -53,8 +53,11 @@ HYdemandArray = numpy.multiply(HYstationLatLongAll[:,7].astype(float), nationalD
 # What are maximum number of plants that the total US demand could support?
 # Total US demand divided by the minimum viable H2 production plant capacity
 maxPlantDemand = numpy.sum(GasdemandArray)
-plantMinCapacity = 10000000000
+plantMinCapacity = 5000000
 maxPlantNumber = numpy.ceil(maxPlantDemand/plantMinCapacity)
+
+print maxPlantNumber
+
 
 # function to calculate lat and long distances
 def distance_on_unit_sphere(lat1, long1, lat2, long2):
@@ -83,7 +86,7 @@ def distance_on_unit_sphere(lat1, long1, lat2, long2):
     # TODO - initialize with existing plants and fix random initialization. 
 
 # TODO - should be maxPlantNumber
-for kNumber in range(1,3, 500): 
+for kNumber in range(1, maxPlantNumber, 1 ): 
     print "kNumber ", kNumber, " is starting at ", datetime.datetime.now()
 
     # perform the clustering
@@ -126,93 +129,76 @@ for kNumber in range(1,3, 500):
 
     #add distances to label file
     label = numpy.append(label, latLongDistArray, axis = 1)
+    # we use these to calculate trucking costs over time
+    meanDist = numpy.mean(latLongDistArray)
+    stdDist = numpy.std(latLongDistArray)
 
-    # now set up decision criteria for distribution
-    
-    def costTruck(distance, demand):
-        truckCapacity = 30 # m^3
-        unitTruckCost = 200 # $
-        # do we need to adjust cost piecewise for truck distances?
-        truckNumber = math.ceil((demand)/truckCapacity) # round up
-        totalTruckCost = unitTruckCost * truckNumber
-        return totalTruckCost
 
+    # now set up decision criteria for distribution: reforming, electrolysis, and centralized
     # reformer cost = reformer * number of stations but demand constraint
     def costReformer(demand):
-        #capital costs
-        # we assume the station already exists, so all we need to add is the H2 generating equipment
-        NGCost = 5 # $ per kg of H2 created
-        reformerCapacity = 5000
-        reformerCost = 3
-        reformerNumber = math.ceil(demand/reformerCapacity) #round up
-        # reformer cost is total installation costs divided by demand (fixed segment) plus NG cost
-        totalReformerCost = (reformerNumber * reformerCost) + NGCost*demand
+        reformerH2Cost = 10.3 #$/kg high side estimate. Lower bound is $7.7
+        #taken from NREL analysis http://www.nrel.gov/hydrogen/pdfs/54475.pdf
+        totalReformerCost = reformerH2Cost*demand
         return totalReformerCost
 
+    # electrolysis cost
+    def costElectrolysis(demand):
+        ElectrolysisH2Cost = 12.9 #$/kg high side estimate. Lower bound is $10.0
+        #taken from NREL analysis http://www.nrel.gov/hydrogen/pdfs/54475.pdf
+        totalElectrolysisCost = ElectrolysisH2Cost*demand
+        return totalElectrolysisCost
+
     # Plant Production Cost
-    def plantCost(aggDemand):
-        plantVarCost = 10 # $per kg H2 produced
-        if aggDemand<5000000000:
-            plantCost = 2000000000
-        elif aggDemand>10000000000:
-            plantCost = 5000000000
+    def plantCost(aggDemand, distance):
+        plantProdCost = 10.33 # $per kg H2 produced
+        highPlantCost = plantProdCost * 1.25
+        lowPlantCost = plantProdCost * 0.75
+        if distance > meanDist + stdDist:
+            plantCost = aggDemand*highPlantCost
+        elif distance < meanDist - stdDist:
+            plantCost = aggDemand * lowPlantCost
         else:
-            plantCost = 3000000000
-        # assume constant variable costs across all plants. 
-        return plantCost + plantVarCost*aggDemand
+            plantCost = aggDemand * plantProdCost
+        return plantCost
 
 
 
-
-    def assignProduction(plantTotalCost, aggDemand, clusterNodes):
+    def assignProduction(clusterNodes):
         # figure out what kind of edge to have
-        # prodCost is portion of plant total cost assigned to that node - will change in while loop later
-        prodCost = plantTotalCost/aggDemand
-
         # set up reformer cost calculation - what is setup cost of reformer + H2 Production cost
         reformCost = numpy.ndarray((len(clusterNodes),1), dtype = float)
         for i in range(0, len(clusterNodes)):
             reformCost[i] = costReformer(clusterNodes[i, 1].astype(float))    
-        # set up edge decision array - initialize as plant, then go through adjustment process in
-        # while loop
-        edgeDecision = numpy.ndarray(shape=(len(clusterNodes), 1), dtype='S20')
-        edgeDecision[:] = "Plant"
-        # add costs for plant production
-        plantNodeCost = numpy.ndarray(shape=(len(clusterNodes), 1), dtype=float)
-        # we want to spit out all information from this function, including costs, so we append all
-        # arrays together
-        clusterNodes = numpy.append(clusterNodes, reformCost, axis = 1)
-        clusterNodes = numpy.append(clusterNodes, edgeDecision, axis = 1)
-        clusterNodes = numpy.append(clusterNodes, plantNodeCost, axis = 1)
-        transfer = float('inf')
-        while transfer != 0:
-            # to check the change from the beginning of the while loop to the end (when cost changes
-            # are taken in to account) we copy the clusterNodes at the beginning of the loop
-            updateArray = copy.copy(clusterNodes)
-            # figure out new demand (if some nodes transfer from plant to reformer in previous period)
-            # and calculate the new plant cost
-            subAggDemand = numpy.sum(clusterNodes[:, 1].astype('float'))
-            prodCost = plantCost(subAggDemand)/subAggDemand
-            # now we actually calculate the lowest-cost edge between plant and station. 
-            for i in range(0, len(clusterNodes)):
-                edge = clusterNodes[i, 2]
-                edgeTruckCost = costTruck(edge.astype("float32"), subAggDemand)
-                if edgeTruckCost + prodCost >= reformCost[i]:
-                    clusterNodes[i, 4] = "Reformer"
-                    clusterNodes[i, 5] = clusterNodes[i,3]
-                else:
-                    clusterNodes[i,4] = "Plant"
-                    clusterNodes[i, 5] = clusterNodes[i,2].astype("float32")*prodCost
+        ElectrolysisCost = numpy.ndarray((len(clusterNodes),1), dtype = float)
+        for i in range(0, len(clusterNodes)):
+            ElectrolysisCost[i] = costElectrolysis(clusterNodes[i, 1].astype(float)) 
+        CentralizedCost = numpy.ndarray((len(clusterNodes),1), dtype = float)
+        for i in range(0, len(clusterNodes)):
+            centralAggDemand = clusterNodes[i, 1].astype(float)
+            centralDistance = clusterNodes[i,2].astype(float)
+            CentralizedCost[i] = plantCost(centralAggDemand, centralDistance) 
 
-            # now figure out what has changed from last iteration to this one
-            transfer = 0           
-            for i in range(0, len(clusterNodes)):
-                if updateArray[i,4].astype(str) != clusterNodes[i,4].astype(str):
-                    transfer +=1
-            print 'transfer = ', transfer
+
+        edgeDecision = numpy.ndarray(shape=(len(clusterNodes), 1), dtype='S20')
+        edgeCost = numpy.ndarray(shape=(len(clusterNodes), 1), dtype=float)
+        for i in range(0, len(clusterNodes)):
+            if reformCost[i]< ElectrolysisCost[i]:
+                if reformCost[i] < CentralizedCost[i]:
+                    edgeDecision[i] = "Reformer"
+                    edgeCost[i] = numpy.multiply(reformCost[i], clusterNodes[i,1])
+            elif ElectrolysisCost[i] < reformCost[i]:
+                if ElectrolysisCost[i] < CentralizedCost[i]:
+                    edgeDecision[i] = "Electrolysis"
+                    edgeCost[i] = numpy.multiply(ElectrolysisCost[i], clusterNodes[i,1])
+            else:
+                edgeDecision[i] = "Centralized"
+                edgeCost[i] = numpy.multiply(CentralizedCost[i], clusterNodes[i,1])
+
+        clusterNodes = numpy.append(clusterNodes, edgeDecision, axis = 1)
+        clusterNodes = numpy.append(clusterNodes, edgeCost, axis = 1)
         return clusterNodes
     
-#TODO - NG station reformer costs
 #TODO - foregone gas profits
     start = 0
     totalDecision = []
@@ -220,74 +206,63 @@ for kNumber in range(1,3, 500):
         clusterNodes = label[label[:, 0] == i]
         row = len(clusterNodes)
         aggDemand = plantDemandArray[i, 1].astype("float32")
-        plantTotalCost = plantCost(aggDemand)
-        Decision = assignProduction(plantTotalCost, aggDemand, clusterNodes)
+        Decision = assignProduction(clusterNodes)
         if i == 0:
             totalDecision = Decision
         else:
             totalDecision = numpy.append(totalDecision, Decision, axis = 0)
    
-
-   
     print "totalDecision complete at ", datetime.datetime.now()
 
-    
+
+    print totalDecision[0:50]
+
+
+    networkCostArray = totalDecision[:, 4].astype(float)
+    networkCost = numpy.sum(networkCostArray)
+    print "Network Cost for ", kNumber, "plants is ", networkCost
 
     # total costs and other network details stored in:
     lowCostNetwork = numpy.ndarray(shape=(len(totalDecision), 5), dtype ='S20')
 
-    if networkCost < totalNetworkCostSum:
+    if networkCost < totalGasNetworkCostSum:
         lowCostNetwork = totalDecision
         lowKNumber = kNumber
 
-    totalNetworkCostSum = networkCost        
+    totalGasNetworkCostSum = networkCost        
 
 print 'lowest cost gas network cluster number is ', lowKNumber
-print lowCostNetwork[0:100]
+numpy.savetxt("low_cost_output.csv", lowCostNetwork, fmt = '%-10s', delimiter=",")
+
 
 print 'Now calculate low cost NG station'
-
 NGstationCost = numpy.ndarray(shape=(len(NGstationLatLongAll),1), dtype=float)
 for i in range(0, len(NGdemandArray)):
     # need foregone NG revenue here too!
-    NGstationCost[i] = costReformer(NGdemandArray[i].astype(float)) 
-    
+    NGstationCost[i] = costReformer(NGdemandArray[i].astype(float))
+    NGstationSum = numpy.sum(NGstationCost)
+NGstationLatLongAll = numpy.append(NGstationLatLongAll, NGstationCost, axis = 1)
 
+numpy.savetxt("ng_low_cost_output.csv", NGstationLatLongAll, fmt = '%-10s', delimiter=",")
 
-
-# need to calculate total station costs per steady-state year
-def StationProfit(stationArray, H2price, gasPrice):
-    return null
- 
-plantNodes = totalDecision[totalDecision[:,4] == "Plant"]
-reformerNodes = totalDecision[totalDecision[:,4] =="Reformer"]
-plantNodesCost = plantNodes[:,5].astype(float)
-reformerNodesCost = reformerNodes[:,5].astype(float)
-networkCost = numpy.sum(plantNodesCost) + numpy.sum(reformerNodesCost)
-print "Network Cost for ", kNumber, "plants is ", networkCost
+print 'Total NG network cost is: ', NGstationSum
+print 'Total Network Cost including NG stations is: ', totalGasNetworkCostSum + NGstationSum
 print 'analysis complete at ', datetime.datetime.now()
 
 
+# totalNetwork: clusterID, demand, distance, node type, total node cost
 
-
-    # Production cost at plant - assume same costs over all regions
-      
-
-
+# to finish after - can station make profit?
+#def StationProfit(stationArray, H2price, gasPrice):
+#    return null
 
 
 
     # TO FIX
     # all production costs covered
-    # catch all non-positive inequalities
-    # make sure last array entries aren't getting dropped
-    # include nodeStorage cost & capacity
-    # cost of reforming, but will have to write in preclusion of other network
-    # and only use NG stations
-
- 
-    #export everything from "result" array
-    #numpy.savetxt("OptOutput@{0}.csv".format(datetime.datetime.now()), result, delimiter=",", fmt="%s")
+    # need to calculate total station costs per steady-state year
+    # foregone revenue from gas/NG sales
+    # metric for distance to NG pipeline?
 
 
 
